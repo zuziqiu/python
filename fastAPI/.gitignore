@@ -1,0 +1,39 @@
+# Virtual environments
+.venv/
+.fastAPI_env/
+venv/
+env/
+
+# Python bytecode and interpreter caches at any directory depth
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Test, lint, type-check, and coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Runtime output
+*.log
+
+# Build and package output
+build/
+dist/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and operating system files
+.vscode/*
+!.vscode/settings.json
+.idea/
+.DS_Store

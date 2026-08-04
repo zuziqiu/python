@@ -1,17 +1,24 @@
 [project]
-name = "fastapi"
+name = "enterprise-api"
 version = "0.1.0"
-description = "Add your description here"
+description = "A simplified enterprise FastAPI service"
 readme = "README.md"
 authors = [
     { name = "echo", email = "q804815006@foxmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+]
 
-[project.scripts]
-fastapi = "fastapi:main"
+[tool.uv]
+package = false
 
-[build-system]
-requires = ["uv_build>=0.12.1,<0.13.0"]
-build-backend = "uv_build"
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
