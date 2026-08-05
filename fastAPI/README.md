@@ -6,7 +6,21 @@
 
 ```bash
 uv sync
+cp .env.example .env
 ```
+
+## PostgreSQL
+
+Set `APP_DATABASE_URL` in `.env` for your local or managed PostgreSQL instance,
+then apply the schema migration:
+
+```bash
+uv run alembic upgrade head
+```
+
+`APP_DATABASE_URL` is the only required production setting. Configure it with a
+managed PostgreSQL connection string through the deployment environment; do not
+commit production credentials to `.env`.
 
 ## Run
 
