@@ -18,9 +18,9 @@ then apply the schema migration:
 uv run alembic upgrade head
 ```
 
-`APP_DATABASE_URL` is the only required production setting. Configure it with a
-managed PostgreSQL connection string through the deployment environment; do not
-commit production credentials to `.env`.
+Set `APP_SILICONFLOW_API_KEY` as well. The application does not read `AI_KEY`.
+Configure both values through the deployment environment and do not commit
+credentials to `.env`.
 
 ## Run
 
@@ -29,6 +29,27 @@ uv run uvicorn src.main:app --reload
 ```
 
 API documentation: http://127.0.0.1:8000/docs
+
+## Conversation API
+
+`POST /api/v1/conversation` accepts JSON and returns `text/event-stream`:
+
+```json
+{
+  "user_id": "01",
+  "conversation_id": null,
+  "messages": [
+    { "role": "user", "content": "Previous question" },
+    { "role": "assistant", "content": "Previous answer" }
+  ],
+  "content": "Current question"
+}
+```
+
+`conversation_id` may be omitted for the first turn. The stream emits
+`reasoning`, `content`, and `done` events. Reasoning is never persisted; after a
+complete model response, the current user message and final assistant answer are
+appended to `conversation.messages` in one database transaction.
 
 ## Check
 

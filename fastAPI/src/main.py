@@ -72,12 +72,20 @@ def create_app() -> FastAPI:
         request: Request,
         exc: RequestValidationError,
     ) -> JSONResponse:
+        details = [
+            {
+                key: value
+                for key, value in error.items()
+                if key not in {"ctx", "input"}
+            }
+            for error in exc.errors()
+        ]
         response = ErrorResponse(
             error=ErrorDetail(
                 code="VALIDATION_ERROR",
                 message="Request validation failed",
                 request_id=getattr(request.state, "request_id", None),
-                details=exc.errors(),
+                details=details,
             )
         )
         return JSONResponse(status_code=422, content=jsonable_encoder(response))

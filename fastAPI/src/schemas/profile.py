@@ -10,13 +10,3 @@ class ProfileUpdateRequest(BaseModel):
 class ProfileResponse(BaseModel):
     user_id: str
     name: str
-
-
-class ProfileMessageResponse(BaseModel):
-    text: str
-
-
-class ProfileWithMessageResponse(BaseModel):
-    user_id: str
-    name: str
-    message: list[ProfileMessageResponse]
