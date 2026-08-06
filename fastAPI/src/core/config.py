@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     database_pool_timeout_seconds: int = 30
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
-    siliconflow_model: str = "deepseek-ai/DeepSeek-R1"
+    siliconflow_model: str = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
     siliconflow_temperature: float = 0.7
     siliconflow_max_tokens: int = 4096
 

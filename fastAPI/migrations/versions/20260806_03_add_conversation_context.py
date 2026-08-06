@@ -66,6 +66,12 @@ def upgrade() -> None:
                 SELECT :conversation_id, :user_id, :title
                 WHERE EXISTS (SELECT 1 FROM message WHERE user_id = :user_id)
                 """
+            ).bindparams(
+                sa.bindparam(
+                    "conversation_id", type_=postgresql.UUID(as_uuid=True)
+                ),
+                sa.bindparam("user_id", type_=sa.String(length=64)),
+                sa.bindparam("title", type_=sa.String(length=255)),
             ),
             {
                 "conversation_id": conversation_id,
@@ -82,6 +88,11 @@ def upgrade() -> None:
                 WHERE user_id = :user_id
                 ORDER BY id
                 """
+            ).bindparams(
+                sa.bindparam(
+                    "conversation_id", type_=postgresql.UUID(as_uuid=True)
+                ),
+                sa.bindparam("user_id", type_=sa.String(length=64)),
             ),
             {"conversation_id": conversation_id, "user_id": user_id},
         )

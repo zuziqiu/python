@@ -28,6 +28,11 @@ class AIStreamChunk:
 class SiliconFlowError(Exception):
     """表示 SiliconFlow 请求失败或流未完整结束。"""
 
+    def __init__(self, message: str, *, code: str = "AI_STREAM_FAILED") -> None:
+        """保存可安全返回给客户端的稳定错误码。"""
+        super().__init__(message)
+        self.code = code
+
 
 class SiliconFlowClient:
     """通过 SiliconFlow 的 OpenAI 兼容接口异步生成流式回答。"""
@@ -77,7 +82,12 @@ class SiliconFlowClient:
                 if response.is_error:
                     await response.aread()
                     raise SiliconFlowError(
-                        f"SiliconFlow returned HTTP {response.status_code}"
+                        f"SiliconFlow returned HTTP {response.status_code}",
+                        code=(
+                            "AI_PAYMENT_REQUIRED"
+                            if response.status_code == 402
+                            else "AI_STREAM_FAILED"
+                        ),
                     )
 
                 async for line in response.aiter_lines():
@@ -93,13 +103,21 @@ class SiliconFlowClient:
                     choices = chunk.get("choices") or []
                     if not choices:
                         continue
-                    delta = choices[0].get("delta") or {}
+                    choice = choices[0]
+                    delta = choice.get("delta") or {}
                     reasoning = delta.get("reasoning_content")
                     content = delta.get("content")
                     if reasoning:
                         yield AIStreamChunk(kind="reasoning", delta=reasoning)
                     if content:
                         yield AIStreamChunk(kind="content", delta=content)
+                    finish_reason = choice.get("finish_reason")
+                    if finish_reason == "stop":
+                        return
+                    if finish_reason is not None:
+                        raise SiliconFlowError(
+                            f"SiliconFlow stopped with reason: {finish_reason}"
+                        )
         except (httpx.HTTPError, json.JSONDecodeError) as exc:
             raise SiliconFlowError("SiliconFlow stream failed") from exc
 

@@ -25,6 +25,7 @@ from src.db.session import get_db_session, session_factory
 from src.schemas.conversation import ConversationRequest, ConversationResponse
 
 router = APIRouter(tags=["conversation"])
+SYSTEM_PROMPT = "You are a helpful assistant."
 
 
 def _sse_event(event: str, data: dict[str, str]) -> str:
@@ -55,32 +56,45 @@ async def stream_conversation(
     async def event_stream() -> AsyncIterator[str]:
         """转发模型增量，并在收到完整结束信号后提交一次事务。"""
         assistant_parts: list[str] = []
-        ai_messages = [message.model_dump() for message in payload.messages]
+        ai_messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            *[
+                message.model_dump()
+                for message in payload.messages
+                if message.role != "system"
+            ],
+        ]
         ai_messages.append({"role": "user", "content": payload.content})
 
         try:
-            async for chunk in ai_client.stream_chat(ai_messages):
-                if chunk.kind == "content":
-                    assistant_parts.append(chunk.delta)
-                yield _sse_event(chunk.kind, {"delta": chunk.delta})
+            try:
+                async for chunk in ai_client.stream_chat(ai_messages):
+                    if chunk.kind == "content":
+                        assistant_parts.append(chunk.delta)
+                    yield _sse_event(chunk.kind, {"delta": chunk.delta})
 
-            assistant_content = "".join(assistant_parts)
-            if not assistant_content:
-                raise SiliconFlowError("SiliconFlow returned no answer content")
+                assistant_content = "".join(assistant_parts)
+                if not assistant_content:
+                    raise SiliconFlowError("SiliconFlow returned no answer content")
 
-            async with session_factory() as write_db:
-                await save_completed_turn_controller(
-                    write_db,
-                    user_id=payload.user_id,
-                    conversation_id=conversation_id,
-                    user_content=payload.content,
-                    assistant_content=assistant_content,
-                )
-                await write_db.commit()
+                async with session_factory() as write_db:
+                    await save_completed_turn_controller(
+                        write_db,
+                        user_id=payload.user_id,
+                        conversation_id=conversation_id,
+                        user_content=payload.content,
+                        assistant_content=assistant_content,
+                    )
+                    await write_db.commit()
 
-            yield _sse_event("done", {"conversation_id": str(conversation_id)})
-        except SiliconFlowError:
-            yield _sse_event("error", {"code": "AI_STREAM_FAILED"})
+                yield _sse_event("done", {"conversation_id": str(conversation_id)})
+                return
+            except SiliconFlowError as exc:
+                yield _sse_event("error", {"code": exc.code})
+                return
+        finally:
+            assistant_parts.clear()
+            ai_messages.clear()
 
     return StreamingResponse(
         event_stream(),
