@@ -40,6 +40,7 @@ def _sse_event(event: str, data: dict[str, str]) -> str:
 async def stream_conversation(
     payload: ConversationRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    # Annotated 携带 FastAPI 依赖元数据；SiliconFlowClient 是参数类型，Depends 将 getter 返回值注入 ai_client。
     ai_client: Annotated[SiliconFlowClient, Depends(get_siliconflow_client)],
 ) -> StreamingResponse:
     """流式返回推理和回答，仅在完整结束后持久化本轮问答。"""

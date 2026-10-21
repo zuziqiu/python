@@ -10,6 +10,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from src.ai.siliconflow import create_siliconflow_client
+
 # v1 路由聚合器导出所有当前版本的 HTTP 接口。
 from src.api.v1.router import router as api_v1_router
 
@@ -33,15 +35,19 @@ from src.schemas.common import ErrorDetail, ErrorResponse
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
     # 服务开始接收请求前执行 SELECT 1；连接串、账号或 PostgreSQL 不可用时启动失败。
     await connect_database()
-    # 正常或者异常关闭服务都能最终进入 close_database
+    siliconflow_client = None
     try:
+        siliconflow_client = create_siliconflow_client()
+        app.state.siliconflow_client = siliconflow_client
         yield
     finally:
+        if siliconflow_client is not None:
+            await siliconflow_client.close()
         # 服务停止时释放数据库连接池，避免连接长期占用。
         await close_database()
 
