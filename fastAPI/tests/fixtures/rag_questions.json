@@ -1,0 +1,58 @@
+[
+  {
+    "id": "role",
+    "question": "根据这份资料，公孙离是什么定位，核心机制是什么？",
+    "answerable": true,
+    "expected_answer": "根据资料，她是射手，核心机制是放伞、位移、回伞。",
+    "source_file": "knowledge/gongsunli.md",
+    "source_sections": ["角色与核心机制"]
+  },
+  {
+    "id": "projectile-defense",
+    "question": "对面一直用远程弹道打我，这份攻略说阿离可以怎么应对？",
+    "answerable": true,
+    "expected_answer": "根据资料，公孙离的二技能霜叶舞可以击落飞行物，需要掌握释放时机。",
+    "source_file": "knowledge/gongsunli.md",
+    "source_sections": ["技能介绍", "实战思路"]
+  },
+  {
+    "id": "passive-marks",
+    "question": "根据资料，公孙离普攻印记叠多少层会触发爆炸？",
+    "answerable": true,
+    "expected_answer": "根据资料，叠满四层触发爆炸伤害。",
+    "source_file": "knowledge/gongsunli.md",
+    "source_sections": ["技能介绍"]
+  },
+  {
+    "id": "team-matchup",
+    "question": "这份资料说公孙离怕哪些英雄，适合配哪些坦克？",
+    "answerable": true,
+    "expected_answer": "资料列出的克制英雄是东皇太一、妲己；搭配坦克举例是白起、张飞。",
+    "source_file": "knowledge/gongsunli.md",
+    "source_sections": ["实战思路"]
+  },
+  {
+    "id": "equipment",
+    "question": "这份介绍推荐的输出三件套是什么？",
+    "answerable": true,
+    "expected_answer": "根据资料，输出三件套是末世、无尽战刃、破晓；资料未核实游戏版本。",
+    "source_file": "knowledge/gongsunli.md",
+    "source_sections": ["出装与铭文参考"]
+  },
+  {
+    "id": "missing-cooldown",
+    "question": "公孙离二技能满级冷却时间具体是多少秒？",
+    "answerable": false,
+    "expected_answer": "资料没有提供具体冷却时间，无法根据这份资料确定。",
+    "source_file": "knowledge/gongsunli.md",
+    "source_sections": []
+  },
+  {
+    "id": "missing-current-version",
+    "question": "这套出装在最新版本一定是最强的吗？",
+    "answerable": false,
+    "expected_answer": "无法确定。资料未提供游戏版本，也没有当前版本的强度对比证据。",
+    "source_file": "knowledge/gongsunli.md",
+    "source_sections": ["资料说明"]
+  }
+]

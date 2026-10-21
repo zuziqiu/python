@@ -59,6 +59,19 @@ API documentation: http://127.0.0.1:8000/docs
 complete model response, the current user message and final assistant answer are
 appended to `conversation.messages` in one database transaction.
 
+## RAG 资料准备
+
+第一版使用 `knowledge/` 中的 Markdown/TXT 作为共用测试知识库，暂不导入业务用户数据。
+
+1. 阅读 [公孙离资料](knowledge/gongsunli.md)：内容来自用户，没有核实游戏版本；先把它当作检索样本，不当作官方攻略。
+2. 保留文档标题与章节：后续按段落切片，并保存文件名、章节和片段顺序，便于回答时说明资料来源。当前尚未切片或生成向量。
+3. 使用 [检查题](tests/fixtures/rag_questions.json)：`question` 是测试问题，`expected_answer` 是核对要点，不要求模型逐字复述。
+4. 对 `answerable: true` 的题目，核对搜索片段是否包含答案，来源是否匹配 `source_sections`；该列表列出可接受的章节，多个章节可以提供相关证据。
+5. 对 `answerable: false` 的题目，检查回答是否说明资料不足，而不是编造数值或最新版本结论。
+
+检查题不是知识资料，不要把 `tests/` 导入知识库。当前聊天接口仍没有 RAG 检索，模拟回答也不能验证知识问答效果。
+下一步先确认 PostgreSQL 的 `pgvector` 支持并选择可用的 Embedding 模型，再创建知识库表和入库脚本。
+
 ## Check
 
 ```bash
