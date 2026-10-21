@@ -5,7 +5,7 @@
 ```text
 src/
 ├── ai/
-│   └── siliconflow.py        # DeepSeek-R1 流式客户端
+│   └── openai.py        # OpenAI 流式客户端
 ├── api/v1/
 │   ├── conversation.py       # Conversation SSE、查询和删除接口
 │   ├── profile.py            # Profile 名称更新接口
@@ -65,7 +65,7 @@ check constraint 限制 `user_id = '01'`。
 sequenceDiagram
     participant Client as Client
     participant API as FastAPI
-    participant AI as SiliconFlow
+    participant AI as OpenAI
     participant DB as PostgreSQL
 
     Client->>API: POST /conversation
@@ -90,7 +90,7 @@ sequenceDiagram
 
 ## 接口
 
-- `POST /api/v1/conversation`：流式调用 DeepSeek-R1。
+- `POST /api/v1/conversation`：流式调用 OpenAI。
 - `GET /api/v1/conversation`：列出 profile `01` 的完整会话。
 - `DELETE /api/v1/conversation/{conversation_id}`：删除一个窗口。
 - `POST /api/v1/profile`：更新 profile `01` 的名称。
@@ -98,7 +98,7 @@ sequenceDiagram
 ## 配置与迁移
 
 配置通过 `src/core/config.py` 的 `APP_` 前缀读取。AI key 只读取
-`APP_SILICONFLOW_API_KEY`，不兼容 `AI_KEY`。密钥必须由本地 `.env` 或部署平台
+`APP_OPENAI_API_KEY`，不兼容 `AI_KEY`。密钥必须由本地 `.env` 或部署平台
 注入，不应提交到 Git。
 
 Alembic 是生产数据库结构变更的唯一入口：

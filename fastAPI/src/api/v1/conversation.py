@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -7,10 +8,10 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.ai.siliconflow import (
-    SiliconFlowClient,
-    SiliconFlowError,
-    get_siliconflow_client,
+from src.ai.openai import (
+    OpenAIClient,
+    OpenAIError,
+    get_openai_client,
 )
 from src.api.v1.responses import ERROR_RESPONSES
 from src.controllers.conversation import (
@@ -40,8 +41,8 @@ def _sse_event(event: str, data: dict[str, str]) -> str:
 async def stream_conversation(
     payload: ConversationRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
-    # Annotated 携带 FastAPI 依赖元数据；SiliconFlowClient 是参数类型，Depends 将 getter 返回值注入 ai_client。
-    ai_client: Annotated[SiliconFlowClient, Depends(get_siliconflow_client)],
+    # Annotated 携带 FastAPI 依赖元数据；OpenAIClient 是参数类型，Depends 将 getter 返回值注入 ai_client。
+    ai_client: Annotated[OpenAIClient | None, Depends(get_openai_client)],
 ) -> StreamingResponse:
     """流式返回推理和回答，仅在完整结束后持久化本轮问答。"""
     await get_profile_by_user_id_controller(db, user_id=payload.user_id)
@@ -68,6 +69,8 @@ async def stream_conversation(
 
         try:
             try:
+                if ai_client is None:
+                    raise OpenAIError("OpenAI is not configured", code="AI_NOT_CONFIGURED")
                 async for chunk in ai_client.stream_chat(ai_messages):
                     if chunk.kind == "content":
                         assistant_parts.append(chunk.delta)
@@ -75,23 +78,27 @@ async def stream_conversation(
 
                 assistant_content = "".join(assistant_parts)
                 if not assistant_content:
-                    raise SiliconFlowError("SiliconFlow returned no answer content")
+                    raise OpenAIError("OpenAI returned no answer content")
+            except OpenAIError:
+                mock_answer = f"模拟数据 {datetime.now().astimezone():%Y-%m-%d %H:%M:%S}"
+                assistant_content = "".join(assistant_parts) + mock_answer
+                yield _sse_event("content", {
+                    "delta": mock_answer,
+                    "question": payload.content,
+                    "answer": assistant_content,
+                })
 
-                async with session_factory() as write_db:
-                    await save_completed_turn_controller(
-                        write_db,
-                        user_id=payload.user_id,
-                        conversation_id=conversation_id,
-                        user_content=payload.content,
-                        assistant_content=assistant_content,
-                    )
-                    await write_db.commit()
+            async with session_factory() as write_db:
+                await save_completed_turn_controller(
+                    write_db,
+                    user_id=payload.user_id,
+                    conversation_id=conversation_id,
+                    user_content=payload.content,
+                    assistant_content=assistant_content,
+                )
+                await write_db.commit()
 
-                yield _sse_event("done", {"conversation_id": str(conversation_id)})
-                return
-            except SiliconFlowError as exc:
-                yield _sse_event("error", {"code": exc.code})
-                return
+            yield _sse_event("done", {"conversation_id": str(conversation_id)})
         finally:
             assistant_parts.clear()
             ai_messages.clear()

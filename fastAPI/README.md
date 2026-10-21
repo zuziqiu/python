@@ -18,9 +18,17 @@ then apply the schema migration:
 uv run alembic upgrade head
 ```
 
-Set `APP_SILICONFLOW_API_KEY` as well. The application does not read `AI_KEY`.
+Set `APP_OPENAI_API_KEY` as well. The application does not read `AI_KEY`.
 Configure both values through the deployment environment and do not commit
 credentials to `.env`.
+
+The default OpenAI base URL is `https://api.openai.com/v1` and the default model
+is `gpt-4o-mini`. Override them with `APP_OPENAI_BASE_URL` and `APP_OPENAI_MODEL`.
+When the API key is missing or the upstream AI call fails, the stream emits an
+ordinary `content` event containing `delta`, `question`, and a timestamped mock
+`answer`, followed by `done` with the conversation ID. Mock answers are persisted
+like normal answers. If the upstream stream already emitted partial content,
+the mock text is appended to it and the combined answer is persisted.
 
 ## Run
 

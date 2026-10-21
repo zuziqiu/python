@@ -6,7 +6,6 @@ from fastapi import Request
 from openai import APIError, APIStatusError, AsyncOpenAI
 
 from src.core.config import get_settings
-from src.core.errors import AppError
 
 
 class AIMessageInput(TypedDict):
@@ -118,13 +117,6 @@ def create_siliconflow_client() -> SiliconFlowClient | None:
     )
 
 
-def get_siliconflow_client(request: Request) -> SiliconFlowClient:
+def get_siliconflow_client(request: Request) -> SiliconFlowClient | None:
     """从应用状态获取共享的 SiliconFlow 客户端。"""
-    client = getattr(request.app.state, "siliconflow_client", None)
-    if client is None:
-        raise AppError(
-            code="AI_NOT_CONFIGURED",
-            message="SiliconFlow API key is not configured",
-            status_code=503,
-        )
-    return client
+    return getattr(request.app.state, "siliconflow_client", None)

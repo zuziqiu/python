@@ -1,15 +1,15 @@
 """AI 平台客户端与流式响应类型。"""
 
-from src.ai.siliconflow import (
+from src.ai.openai import (
     AIStreamChunk,
-    SiliconFlowClient,
-    SiliconFlowError,
-    get_siliconflow_client,
+    OpenAIClient,
+    OpenAIError,
+    get_openai_client,
 )
 
 __all__ = [
     "AIStreamChunk",
-    "SiliconFlowClient",
-    "SiliconFlowError",
-    "get_siliconflow_client",
+    "OpenAIClient",
+    "OpenAIError",
+    "get_openai_client",
 ]

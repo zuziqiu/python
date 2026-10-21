@@ -16,11 +16,11 @@ class Settings(BaseSettings):
     database_pool_size: int = 10
     database_max_overflow: int = 20
     database_pool_timeout_seconds: int = 30
-    siliconflow_api_key: str = ""
-    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
-    siliconflow_model: str = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
-    siliconflow_temperature: float = 0.7
-    siliconflow_max_tokens: int = 4096
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
+    openai_temperature: float = 0.7
+    openai_max_tokens: int = 4096
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
 import src.api.v1.conversation as conversation_api
-from src.ai.siliconflow import (
+from src.ai.openai import (
     AIMessageInput,
     AIStreamChunk,
-    SiliconFlowError,
-    get_siliconflow_client,
+    OpenAIError,
+    get_openai_client,
 )
 from src.db.models.conversation import Conversation
 from src.db.models.profile import Profile
@@ -106,7 +108,7 @@ class FakeSessionFactory:
 
 
 class FakeAIClient:
-    """以可控增量模拟 SiliconFlow 流。"""
+    """以可控增量模拟 OpenAI 流。"""
 
     def __init__(self, store: FakeStore, *, fail: bool = False) -> None:
         self.store = store
@@ -121,7 +123,7 @@ class FakeAIClient:
         assert self.store.commits == 0
         yield AIStreamChunk(kind="reasoning", delta="thinking")
         if self.fail:
-            raise SiliconFlowError("upstream disconnected")
+            raise OpenAIError("upstream disconnected")
         assert self.store.commits == 0
         yield AIStreamChunk(kind="content", delta="final answer")
 
@@ -155,7 +157,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, FakeStore
         yield FakeSession(store)
 
     app.dependency_overrides[get_db_session] = fake_get_db_session
-    app.dependency_overrides[get_siliconflow_client] = lambda: ai_client
+    app.dependency_overrides[get_openai_client] = lambda: ai_client
     monkeypatch.setattr(conversation_api, "session_factory", FakeSessionFactory(store))
     yield TestClient(app), store, ai_client
     app.dependency_overrides.clear()
@@ -229,13 +231,13 @@ def test_existing_conversation_appends_without_overwriting_history(
     ]
 
 
-def test_failed_stream_does_not_persist(
+def test_failed_stream_returns_and_persists_mock_answer(
     api: tuple[TestClient, FakeStore, FakeAIClient],
 ) -> None:
-    """上游未完整结束时应仅返回错误事件且不写数据库。"""
+    """上游失败时返回模拟成功回答，并追加本轮问答。"""
     client, store, _ = api
     failing_client = FakeAIClient(store, fail=True)
-    app.dependency_overrides[get_siliconflow_client] = lambda: failing_client
+    app.dependency_overrides[get_openai_client] = lambda: failing_client
     original_messages = list(store.conversations[0].messages)
 
     response = client.post(
@@ -249,10 +251,46 @@ def test_failed_stream_does_not_persist(
     )
 
     assert response.status_code == 200
-    assert "event: error\ndata: {\"code\": \"AI_STREAM_FAILED\"}" in response.text
-    assert "event: done" not in response.text
-    assert store.commits == 0
-    assert store.conversations[0].messages == original_messages
+    content_data = json.loads(response.text.split("event: content\ndata: ", 1)[1].split("\n\n", 1)[0])
+    assert content_data["question"] == "Will fail"
+    assert content_data["answer"].startswith("模拟数据 ")
+    assert content_data["delta"] == content_data["answer"]
+    datetime.strptime(content_data["answer"].removeprefix("模拟数据 "), "%Y-%m-%d %H:%M:%S").astimezone()
+    assert "event: error" not in response.text
+    done_data = json.loads(response.text.split("event: done\ndata: ", 1)[1].split("\n\n", 1)[0])
+    assert done_data["conversation_id"] == str(CONVERSATION_A_ID)
+    assert store.commits == 1
+    assert store.conversations[0].messages == original_messages + [
+        {"role": "user", "content": "Will fail"},
+        {"role": "assistant", "content": content_data["answer"]},
+    ]
+
+
+def test_unconfigured_ai_returns_mock_answer(
+    api: tuple[TestClient, FakeStore, FakeAIClient],
+) -> None:
+    client, store, _ = api
+    app.dependency_overrides[get_openai_client] = lambda: None
+    store.conversations.clear()
+
+    response = client.post(
+        "/api/v1/conversation",
+        json={"user_id": "01", "messages": [], "content": "No API key"},
+    )
+
+    assert response.status_code == 200
+    content_data = json.loads(response.text.split("event: content\ndata: ", 1)[1].split("\n\n", 1)[0])
+    assert content_data["question"] == "No API key"
+    assert content_data["answer"].startswith("模拟数据 ")
+    assert "event: error" not in response.text
+    done_data = json.loads(response.text.split("event: done\ndata: ", 1)[1].split("\n\n", 1)[0])
+    assert store.commits == 1
+    assert len(store.conversations) == 1
+    assert done_data["conversation_id"] == str(store.conversations[0].id)
+    assert store.conversations[0].messages == [
+        {"role": "user", "content": "No API key"},
+        {"role": "assistant", "content": content_data["answer"]},
+    ]
 
 
 def test_conversation_rejects_non_owner_user_id(
