@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.ai.openai import (
+from src.AIModels.openai import (
     OpenAIClient,
     OpenAIError,
     get_openai_client,

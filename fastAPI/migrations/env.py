@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from src.core.config import get_settings
 
 # 模型模块导出已注册的表元数据，供 Alembic 比对和运行迁移。
-from src.db.models import Base
+from src.db.models.knowledge import KnowledgeChunk
 
 # Alembic 运行时配置对象；连接串与应用使用同一份环境配置。
 config = context.config
@@ -23,7 +23,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # 用 ORM 模型元数据生成或校验迁移需要的表结构。
-target_metadata = Base.metadata
+target_metadata = KnowledgeChunk.metadata
 
 
 def run_migrations_offline() -> None:

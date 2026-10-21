@@ -1,6 +1,6 @@
 """AI 平台客户端与流式响应类型。"""
 
-from src.ai.openai import (
+from src.AIModels.openai import (
     AIStreamChunk,
     OpenAIClient,
     OpenAIError,

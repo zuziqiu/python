@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.api.v1.conversation as conversation_api
-from src.ai.openai import (
+from src.AIModels.openai import (
     AIMessageInput,
     AIStreamChunk,
     OpenAIError,

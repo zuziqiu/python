@@ -10,7 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from src.ai.openai import create_openai_client
+from src.AIModels.openai import create_openai_client
 
 # v1 路由聚合器导出所有当前版本的 HTTP 接口。
 from src.api.v1.router import router as api_v1_router
