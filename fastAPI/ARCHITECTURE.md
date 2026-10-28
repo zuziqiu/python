@@ -69,6 +69,22 @@ check constraint 限制 `user_id = '01'`。
 `POST /api/v1/conversation` 接收客户端提供的历史上下文和本轮问题。历史
 `messages` 只用于本次模型输入，不覆盖数据库内容。
 
+### 可选的混合 RAG
+
+`APP_RAG_ENABLED` 默认 `false`，便于先审阅代码而不把知识片段发送给模型。
+开启后，`src/agents/rag_chat.py` 在调用 AI 前复用 `rag.py` 的 `search_knowledge`：
+
+1. 首次请求延迟加载本地缓存的 BGE 模型，不在聊天中下载模型。
+2. 只嵌入本轮问题，查询 `knowledge_chunk` 中同模型的前 K 条片段。
+3. 按距离阈值、片段身份、6000 字符来源 JSON 预算筛选。
+4. 将非可信资料 JSON 与混合回答规则作为额外 system 消息，原始问题保持不变。
+5. 先发送候选 `sources` 事件，再流式生成回答；模型须区分资料依据和通用知识。
+
+`knowledge/` 是资料源，手动 `ingest` 后才更新数据库索引，聊天不直接扫描目录。
+检索失败返回 503，模型失败返回 SSE `error`，均不写入问答、不返回模拟成功。
+来源事件和 system 上下文不持久化；只有最终回答中的引用文本随问答保存。
+阈值是初始启发值，测试用假模型验证接口，不代表已完成真实召回或答案评估。
+
 ```mermaid
 sequenceDiagram
     participant Client as Client
@@ -98,7 +114,7 @@ sequenceDiagram
 
 ## 接口
 
-- `POST /api/v1/conversation`：流式调用 OpenAI。
+- `POST /api/v1/conversation`：可选 RAG，流式调用配置的 AI 提供方。
 - `GET /api/v1/conversation`：列出 profile `01` 的完整会话。
 - `DELETE /api/v1/conversation/{conversation_id}`：删除一个窗口。
 - `POST /api/v1/profile`：更新 profile `01` 的名称。

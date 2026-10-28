@@ -10,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from src.agents.rag_chat import RagRetriever
 from src.AIModels.copilot import CopilotService
 from src.AIModels.openai import create_openai_client
 
@@ -44,6 +45,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     openai_client = None
     copilot_service = None
     try:
+        app.state.rag_retriever = (
+            RagRetriever(
+                top_k=settings.rag_top_k,
+                max_distance=settings.rag_max_distance,
+                model_dir=settings.rag_model_dir,
+            )
+            if settings.rag_enabled else None
+        )
         if settings.ai_provider == "openai":
             openai_client = create_openai_client()
         app.state.openai_client = openai_client

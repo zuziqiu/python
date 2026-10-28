@@ -111,13 +111,13 @@ brew install --cask copilot-cli
 ```
 
 `conversation_id` may be omitted for the first turn. The stream emits
-`reasoning`, `content`, and `done` events. Reasoning is never persisted; after a
+`reasoning`, `content`, and `done` events (plus `sources` when RAG is enabled). Reasoning is never persisted; after a
 complete model response, the current user message and final assistant answer are
 appended to `conversation.messages` in one database transaction.
 
 ## RAG 资料准备
 
-第一版使用 `knowledge/` 中的 Markdown/TXT 作为共用测试知识库，暂不导入业务用户数据。
+第一版使用 `knowledge/` 中的 Markdown 作为共用测试知识库，暂不导入业务用户数据。
 
 1. 阅读 [公孙离资料](knowledge/gongsunli.md)：内容来自用户，没有核实游戏版本；先把它当作检索样本，不当作官方攻略。
 2. 保留文档标题与章节：入库时按段落切片，并保存文件名、章节和片段顺序，便于回答时说明资料来源。
@@ -125,7 +125,79 @@ appended to `conversation.messages` in one database transaction.
 4. 对 `answerable: true` 的题目，核对搜索片段是否包含答案，来源是否匹配 `source_sections`；该列表列出可接受的章节，多个章节可以提供相关证据。
 5. 对 `answerable: false` 的题目，检查回答是否说明资料不足，而不是编造数值或最新版本结论。
 
-检查题不是知识资料，不要把 `tests/` 导入知识库。当前聊天接口仍没有 RAG 检索，模拟回答也不能验证知识问答效果。
+检查题不是知识资料，不要把 `tests/` 导入知识库。模拟回答不能验证知识问答效果。
+
+### 混合 RAG 聊天（代码已接入，默认关闭）
+
+`src/agents/rag_chat.py` 复用 `src/agents/rag.py` 的本地嵌入与 PostgreSQL
+检索；它本身不调用 Copilot 或其他聊天模型。本次仅完成代码及隔离测试，
+未自动入库、未发起真实聊天请求。先审阅代码，需要启用时再设置：
+
+```dotenv
+APP_RAG_ENABLED=true
+APP_RAG_TOP_K=3
+APP_RAG_MAX_DISTANCE=0.4
+```
+
+应用启动时只创建检索器，第一次 RAG 请求才在工作线程加载本地模型，
+之后复用同一模型并串行化共享实例的推理。聊天路径只允许读取已缓存的模型，
+不会自动下载。缓存不完整时返回明确的 503，不改用随机向量或普通聊天伪装成功。
+可通过 `APP_RAG_MODEL_DIR=/absolute/path/to/onnx-model` 指定完整离线模型目录。
+
+调用链：
+
+```text
+POST /api/v1/conversation
+  -> 本轮 content 生成本地查询向量
+  -> 从 knowledge_chunk 按余弦距离取前 K 条
+  -> 过滤距离、去重、限制上下文长度
+  -> 将来源 JSON 和混合回答规则加入服务端 system 消息
+  -> sources SSE 事件
+  -> 已选择的聊天模型生成 reasoning/content
+  -> 保存原始提问与最终回答 -> done
+```
+
+- 知识文件位于 `knowledge/`；聊天读取的是它们**已入库的片段**，
+  不会每次扫描文件或重新索引。文件新增或修改后需手动运行下面的 `ingest` 命令。
+- 当前仅用本轮 `content` 检索，不做基于历史的独立问题改写，
+  因此“它呢”等省略主体的追问可能检索不准。
+- 默认距离阈值 `0.4` 是初始可调值，不是概率或已验证的相关性标准。
+  等于阈值的片段会保留；大于阈值会排除。仍需用样本检查题校准。
+- 片段按 `(source, position)` 去重，引用 ID 为 `K1`、`K2` 等。
+  来源 JSON 总计最多 6000 字符，超出预算的整片跳过，不截断片段。
+- 有相关证据时要求模型在正文用 `[K1]` 等引用，并标明来源/章节。
+  没有支持材料时允许正常聊天，但要求说明非知识库依据；
+  材料缺少的具体数值和最新版本结论不能冒充已知事实。
+- 检索结果是非可信参考数据，不是模型指令。提示词要求忽略片段中的指令，
+  但提示词不是绝对的注入防护，也不能保证模型永远正确引用。
+- 启用 RAG 后，模型请求会包含选中的知识片段。发送到哪里由
+  `APP_AI_PROVIDER` 决定；请在允许资料发送给对应服务时才开启。
+- 检索失败：HTTP 503，错误码 `RAG_RETRIEVAL_FAILED`，不调用聊天模型、不写问答。
+  RAG 模式下任一聊天模型失败：SSE `error`，无 `done`、无模拟回答、不保存半轮。
+  关闭 RAG 则保留原有行为，包括 OpenAI 模式的历史模拟回答逻辑。
+
+开启后，正文前新增一个事件：
+
+```text
+event: sources
+data: {"mode":"hybrid","sources":[{"source":"gongsunli.md","position":2,"section":"公孙离介绍 / 技能介绍","content":"二技能……","distance":0.3,"citation_id":"K1"}]}
+```
+
+无命中时仍返回 `sources: []`。这个事件表示**提供给模型的候选参考资料**，
+不表示模型一定使用了全部片段或已经通过事实核验。客户端可据此显示来源，
+并对应正文引用；不要把它当作回答文字追加。
+当前不新增数据库字段：只保存原始提问及回答（含模型生成的引用文本），
+不保存来源事件和拼接的 system 上下文；刷新后不能从会话 API 恢复结构化来源。
+`done` 仍只含 `conversation_id`。
+
+不调用聊天模型的代码验证：
+
+```bash
+uv run pytest tests/test_rag.py tests/test_rag_chat.py tests/test_api.py -q
+```
+
+这些测试替换了嵌入模型、数据库与 AI，验证代码协议和边界，
+不能据此宣称真实检索召回率或最终答案质量已达标。
 
 ### PostgreSQL 向量扩展
 
@@ -187,7 +259,7 @@ uv run --module src.agents.rag search "公孙离怎么挡飞行物？" --limit 3
 ```
 
 该命令只将问题转换成向量并返回数据库中距离最近的原文、来源和章节，不调用聊天模型，也不保证每个问题都有答案。
-小型样本使用精确距离排序，暂不建近似向量索引。当前聊天接口还没有接入此检索，仍保留之前的模拟回答行为。
+小型样本使用精确距离排序，暂不建近似向量索引。聊天是否使用检索结果由 `APP_RAG_ENABLED` 控制。
 
 可在 pgAdmin 查看真实存储情况：
 
@@ -210,7 +282,7 @@ uv run --module src.agents.rag --model-dir /path/to/model search "公孙离怎�
 使用 LangChain 切分器重新转换后，`gongsunli.md` 已生成并保存 5 个真实片段向量，每个向量为 512 维。
 技能章节完整保留，没有原来独立的“退效果。”尾片段。
 检索“公孙离怎么挡飞行物？”时，第一条命中“实战思路”（余弦距离约 0.306），第二条命中完整的“技能介绍”。
-此结果仅证明样本文档的向量生成、入库和检索可运行，不代表完整问答效果达标；聊天 API 还没有接入检索结果。
+此历史结果仅证明样本文档的向量生成、入库和检索可运行，不代表本次混合 RAG 的完整问答效果达标。
 
 ## Check
 

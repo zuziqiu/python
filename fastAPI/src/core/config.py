@@ -1,6 +1,9 @@
 # functools 的 lru_cache 缓存配置实例，避免每次读取环境变量都重新创建对象。
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
+
+from pydantic import Field
 
 # pydantic-settings 用于从 .env 和环境变量读取、校验数据库配置。
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +25,10 @@ class Settings(BaseSettings):
     copilot_runtime_path: str = ""
     copilot_model: str = "auto"
     copilot_auto_login: bool = True
+    rag_enabled: bool = False
+    rag_top_k: int = Field(default=3, ge=1, le=20)
+    rag_max_distance: float = Field(default=0.4, ge=0, le=2, allow_inf_nan=False)
+    rag_model_dir: Path | None = None
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"

@@ -1,6 +1,7 @@
 import asyncio
 import math
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from tokenizers import Tokenizer
@@ -11,6 +12,7 @@ from src.agents import rag
 from src.agents.rag import (
     LocalEmbedder,
     index_document,
+    search_knowledge,
     split_markdown,
     validate_vectors,
 )
@@ -92,3 +94,30 @@ def test_vectors_require_matching_count_and_dimensions() -> None:
 def test_vectors_reject_zero_and_nonfinite_values(value: float) -> None:
     with pytest.raises(ValueError, match="finite and nonzero"):
         validate_vectors([[value] * EMBEDDING_DIMENSIONS], 1)
+
+
+def test_search_reuses_vector_query_and_returns_typed_source_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    embedder = MagicMock()
+    embedder.query.return_value = [1.0] + [0.0] * (EMBEDDING_DIMENSIONS - 1)
+    rows = [{
+        "source": "gongsunli.md", "position": 1, "section": "技能介绍",
+        "content": "二技能可以击落飞行物。", "distance": 0.3,
+    }]
+    result = MagicMock()
+    result.mappings.return_value.all.return_value = rows
+    db = AsyncMock()
+    db.execute.return_value = result
+    factory = MagicMock()
+    factory.return_value.__aenter__.return_value = db
+    monkeypatch.setattr(rag, "session_factory", factory)
+
+    assert asyncio.run(search_knowledge("如何挡飞行物？", embedder, 3)) == rows
+    embedder.query.assert_called_once_with("如何挡飞行物？")
+    statement = db.execute.call_args.args[0]
+    sql = str(statement)
+    assert "knowledge_chunk.embedding <=>" in sql
+    assert "knowledge_chunk.embedding_model =" in sql
+    assert "ORDER BY distance, knowledge_chunk.source, knowledge_chunk.position" in sql
+    assert 3 in statement.compile().params.values()

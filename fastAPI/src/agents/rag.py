@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 # pathlib 提供跨平台路径操作；Path 用于查找文档和模型文件。
 from pathlib import Path
+from typing import TypedDict
 
 # huggingface_hub 用于从 Hugging Face 模型仓库取得 tokenizer 文件。
 from huggingface_hub import hf_hub_download
@@ -61,6 +62,14 @@ class DocumentChunk:
     section: str
     # 实际送去生成向量、并最终存入数据库的文本片段。
     content: str
+
+
+class KnowledgeMatch(TypedDict):
+    source: str
+    position: int
+    section: str
+    content: str
+    distance: float
 
 
 def split_markdown(
@@ -123,7 +132,9 @@ def validate_vectors(vectors: Iterable[Iterable[float]], count: int) -> list[lis
 
 
 class LocalEmbedder:
-    def __init__(self, model_dir: Path | None = None) -> None:
+    def __init__(
+        self, model_dir: Path | None = None, *, local_files_only: bool = False,
+    ) -> None:
         from fastembed import TextEmbedding
 
         # 指定本地模型目录时要求目录已存在，并让模型只从本地读取，避免意外联网下载。
@@ -135,7 +146,7 @@ class LocalEmbedder:
             cache_dir=str(Path.home() / ".cache" / "enterprise-api" / "embeddings"),
             threads=2,
             specific_model_path=str(model_dir.resolve()) if model_dir is not None else None,
-            local_files_only=model_dir is not None,
+            local_files_only=local_files_only or model_dir is not None,
         )
         # tokenizer 用来按模型实际的 token 规则检查输入长度，而不是估算字符数。
         tokenizer_path = (
@@ -225,7 +236,7 @@ async def index_document(path: Path, embedder: LocalEmbedder) -> dict[str, objec
 
 async def search_knowledge(
     question: str, embedder: LocalEmbedder, limit: int = 3,
-) -> list[dict[str, object]]:
+) -> list[KnowledgeMatch]:
     # 限制返回条数，防止调用方请求过多结果。
     if not 1 <= limit <= 20:
         raise ValueError("limit must be between 1 and 20")
@@ -246,7 +257,14 @@ async def search_knowledge(
     # 执行查询并将每条数据库记录转成字典，供后续调用方读取。
     async with session_factory() as db:
         results = (await db.execute(statement)).mappings().all()
-    return [dict(row) for row in results]
+    return [
+        KnowledgeMatch(
+            source=row["source"], position=row["position"],
+            section=row["section"], content=row["content"],
+            distance=float(row["distance"]),
+        )
+        for row in results
+    ]
 
 
 async def run_command(args: argparse.Namespace) -> None:

@@ -4,12 +4,14 @@ import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
 import src.api.v1.conversation as conversation_api
+from src.agents.rag_chat import RagContext, build_context, get_rag_retriever
 from src.AIModels import get_ai_client
 from src.AIModels.copilot import CopilotError, CopilotService
 from src.AIModels.openai import (
@@ -17,6 +19,7 @@ from src.AIModels.openai import (
     AIStreamChunk,
     OpenAIError,
 )
+from src.core.errors import AppError
 from src.db.models.conversation import Conversation
 from src.db.models.profile import Profile
 from src.db.session import get_db_session
@@ -159,6 +162,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, FakeStore
 
     app.dependency_overrides[get_db_session] = fake_get_db_session
     app.dependency_overrides[get_ai_client] = lambda: ai_client
+    app.dependency_overrides[get_rag_retriever] = lambda: None
     monkeypatch.setattr(conversation_api, "session_factory", FakeSessionFactory(store))
     yield TestClient(app), store, ai_client
     app.dependency_overrides.clear()
@@ -361,3 +365,88 @@ def test_copilot_stream_failure_does_not_save_or_mock(
     assert "模拟数据" not in response.text
     assert store.commits == 0
     assert store.conversations[0].messages == original_messages
+
+
+def test_rag_emits_sources_before_answer_and_only_saves_original_turn(
+    api: tuple[TestClient, FakeStore, FakeAIClient],
+) -> None:
+    client, store, ai = api
+    context = build_context([{
+        "source": "gongsunli.md", "section": "技能介绍", "position": 2,
+        "content": "二技能可以击落飞行物。", "distance": 0.3,
+    }], max_distance=0.4)
+    retriever = AsyncMock()
+    retriever.retrieve.return_value = context
+    app.dependency_overrides[get_rag_retriever] = lambda: retriever
+    store.conversations.clear()
+    response = client.post(
+        "/api/v1/conversation",
+        json={"user_id": "01", "messages": [], "content": "公孙离怎么挡飞行物？"},
+    )
+    assert response.status_code == 200
+    assert response.text.index("event: sources") < response.text.index("event: content")
+    sources_data = json.loads(
+        response.text.split("event: sources\ndata: ", 1)[1].split("\n\n", 1)[0]
+    )
+    assert sources_data == context.event_data()
+    retriever.retrieve.assert_awaited_once_with("公孙离怎么挡飞行物？")
+    assert ai.requests[0][1] == {"role": "system", "content": context.system_message()}
+    assert ai.requests[0][-1] == {"role": "user", "content": "公孙离怎么挡飞行物？"}
+    assert store.conversations[0].messages == [
+        {"role": "user", "content": "公孙离怎么挡飞行物？"},
+        {"role": "assistant", "content": "final answer"},
+    ]
+    assert "event: done" in response.text
+    assert store.commits == 1
+
+
+def test_rag_no_match_keeps_general_chat_with_explicit_prompt(
+    api: tuple[TestClient, FakeStore, FakeAIClient],
+) -> None:
+    client, _, ai = api
+    retriever = AsyncMock()
+    retriever.retrieve.return_value = RagContext([])
+    app.dependency_overrides[get_rag_retriever] = lambda: retriever
+    response = client.post(
+        "/api/v1/conversation",
+        json={"user_id": "01", "messages": [], "content": "你好"},
+    )
+    assert response.status_code == 200
+    assert '"sources": []' in response.text
+    assert "No knowledge passage passed" in ai.requests[0][1]["content"]
+    assert "event: done" in response.text
+
+
+def test_rag_failure_stops_before_model_call_or_persistence(
+    api: tuple[TestClient, FakeStore, FakeAIClient],
+) -> None:
+    client, store, ai = api
+    retriever = AsyncMock()
+    retriever.retrieve.side_effect = AppError("RAG_RETRIEVAL_FAILED", "Unavailable", 503)
+    app.dependency_overrides[get_rag_retriever] = lambda: retriever
+    response = client.post(
+        "/api/v1/conversation",
+        json={"user_id": "01", "messages": [], "content": "Question"},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "RAG_RETRIEVAL_FAILED"
+    assert ai.requests == []
+    assert store.commits == 0
+
+
+def test_rag_openai_failure_never_persists_mock_as_grounded_answer(
+    api: tuple[TestClient, FakeStore, FakeAIClient],
+) -> None:
+    client, store, _ = api
+    retriever = AsyncMock()
+    retriever.retrieve.return_value = RagContext([])
+    app.dependency_overrides[get_rag_retriever] = lambda: retriever
+    app.dependency_overrides[get_ai_client] = lambda: FakeAIClient(store, fail=True)
+    response = client.post(
+        "/api/v1/conversation",
+        json={"user_id": "01", "messages": [], "content": "Question"},
+    )
+    assert "event: error" in response.text
+    assert "event: done" not in response.text
+    assert "模拟数据" not in response.text
+    assert store.commits == 0
