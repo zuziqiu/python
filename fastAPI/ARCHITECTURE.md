@@ -4,8 +4,10 @@
 
 ```text
 src/
-├── ai/
-│   └── openai.py        # OpenAI 流式客户端
+├── AIModels/
+│   ├── __init__.py      # 选择 Copilot 或 OpenAI 客户端
+│   ├── copilot.py       # 后台企业授权、独立 SDK 会话与流式输出
+│   └── openai.py        # 可选的 OpenAI 流式客户端
 ├── api/v1/
 │   ├── conversation.py       # Conversation SSE、查询和删除接口
 │   ├── profile.py            # Profile 名称更新接口
@@ -57,6 +59,12 @@ conversation
 check constraint 限制 `user_id = '01'`。
 
 ## 流式对话
+
+默认使用 Copilot SDK。FastAPI 生命周期启动后台认证任务：检查应用专用目录中的登录，
+必要时运行官方 CLI 登录，完成后重载运行时并复查授权。原 uvicorn 启动命令不变。
+`GET /api/v1/copilot/status` 可查询状态；认证未就绪时聊天返回 503，
+上游失败时发出 SSE `error`，不提交该轮数据库事务。
+`APP_AI_PROVIDER=openai` 保留下面原有 OpenAI 调用链及模拟回答行为。
 
 `POST /api/v1/conversation` 接收客户端提供的历史上下文和本轮问题。历史
 `messages` 只用于本次模型输入，不覆盖数据库内容。

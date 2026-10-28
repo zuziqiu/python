@@ -1,5 +1,6 @@
 # functools 的 lru_cache 缓存配置实例，避免每次读取环境变量都重新创建对象。
 from functools import lru_cache
+from typing import Literal
 
 # pydantic-settings 用于从 .env 和环境变量读取、校验数据库配置。
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +17,11 @@ class Settings(BaseSettings):
     database_pool_size: int = 10
     database_max_overflow: int = 20
     database_pool_timeout_seconds: int = 30
+    ai_provider: Literal["copilot", "openai"] = "copilot"
+    copilot_cli_path: str = ""
+    copilot_runtime_path: str = ""
+    copilot_model: str = "auto"
+    copilot_auto_login: bool = True
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"

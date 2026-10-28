@@ -5,4 +5,5 @@ ERROR_RESPONSES = {
     404: {"model": ErrorResponse, "description": "Resource not found"},
     422: {"model": ErrorResponse, "description": "Validation error"},
     500: {"model": ErrorResponse, "description": "Internal server error"},
+    503: {"model": ErrorResponse, "description": "AI unavailable or login required"},
 }

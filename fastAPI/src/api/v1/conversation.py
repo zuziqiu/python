@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Annotated
@@ -8,11 +9,9 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.AIModels.openai import (
-    OpenAIClient,
-    OpenAIError,
-    get_openai_client,
-)
+from src.AIModels import get_ai_client
+from src.AIModels.copilot import CopilotError, CopilotService
+from src.AIModels.openai import OpenAIClient, OpenAIError
 from src.api.v1.responses import ERROR_RESPONSES
 from src.controllers.conversation import (
     delete_conversation_controller,
@@ -26,6 +25,7 @@ from src.schemas.conversation import ConversationRequest, ConversationResponse
 
 router = APIRouter(tags=["conversation"])
 SYSTEM_PROMPT = "You are a helpful assistant."
+logger = logging.getLogger(__name__)
 
 
 def _sse_event(event: str, data: dict[str, str]) -> str:
@@ -41,8 +41,7 @@ def _sse_event(event: str, data: dict[str, str]) -> str:
 async def stream_conversation(
     payload: ConversationRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
-    # Annotated 携带 FastAPI 依赖元数据；OpenAIClient 是参数类型，Depends 将 getter 返回值注入 ai_client。
-    ai_client: Annotated[OpenAIClient | None, Depends(get_openai_client)],
+    ai_client: Annotated[OpenAIClient | CopilotService | None, Depends(get_ai_client)],
 ) -> StreamingResponse:
     """流式返回推理和回答，仅在完整结束后持久化本轮问答。"""
     await get_profile_by_user_id_controller(db, user_id=payload.user_id)
@@ -78,7 +77,13 @@ async def stream_conversation(
 
                 assistant_content = "".join(assistant_parts)
                 if not assistant_content:
+                    if isinstance(ai_client, CopilotService):
+                        raise CopilotError("Copilot returned no answer content")
                     raise OpenAIError("OpenAI returned no answer content")
+            except CopilotError as exc:
+                logger.exception("Copilot conversation failed; this turn will not be saved.")
+                yield _sse_event("error", {"code": exc.code, "message": str(exc)})
+                return
             except OpenAIError:
                 mock_answer = f"模拟数据 {datetime.now().astimezone():%Y-%m-%d %H:%M:%S}"
                 assistant_content = "".join(assistant_parts) + mock_answer

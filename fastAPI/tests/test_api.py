@@ -10,11 +10,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.api.v1.conversation as conversation_api
+from src.AIModels import get_ai_client
+from src.AIModels.copilot import CopilotError, CopilotService
 from src.AIModels.openai import (
     AIMessageInput,
     AIStreamChunk,
     OpenAIError,
-    get_openai_client,
 )
 from src.db.models.conversation import Conversation
 from src.db.models.profile import Profile
@@ -157,7 +158,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, FakeStore
         yield FakeSession(store)
 
     app.dependency_overrides[get_db_session] = fake_get_db_session
-    app.dependency_overrides[get_openai_client] = lambda: ai_client
+    app.dependency_overrides[get_ai_client] = lambda: ai_client
     monkeypatch.setattr(conversation_api, "session_factory", FakeSessionFactory(store))
     yield TestClient(app), store, ai_client
     app.dependency_overrides.clear()
@@ -237,7 +238,7 @@ def test_failed_stream_returns_and_persists_mock_answer(
     """上游失败时返回模拟成功回答，并追加本轮问答。"""
     client, store, _ = api
     failing_client = FakeAIClient(store, fail=True)
-    app.dependency_overrides[get_openai_client] = lambda: failing_client
+    app.dependency_overrides[get_ai_client] = lambda: failing_client
     original_messages = list(store.conversations[0].messages)
 
     response = client.post(
@@ -270,7 +271,7 @@ def test_unconfigured_ai_returns_mock_answer(
     api: tuple[TestClient, FakeStore, FakeAIClient],
 ) -> None:
     client, store, _ = api
-    app.dependency_overrides[get_openai_client] = lambda: None
+    app.dependency_overrides[get_ai_client] = lambda: None
     store.conversations.clear()
 
     response = client.post(
@@ -308,3 +309,55 @@ def test_conversation_rejects_non_owner_user_id(
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert store.commits == 0
     assert ai_client.requests == []
+
+
+def test_copilot_not_ready_returns_503_and_exposes_safe_status(
+    api: tuple[TestClient, FakeStore, FakeAIClient], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, store, _ = api
+    app.dependency_overrides.pop(get_ai_client)
+    service = CopilotService()
+    service.status = "authenticating"
+    service.error_code = "COPILOT_LOGIN_REQUIRED"
+    monkeypatch.setattr(app.state, "copilot_service", service, raising=False)
+
+    response = client.post(
+        "/api/v1/conversation",
+        json={"user_id": "01", "messages": [], "content": "Hello"},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "COPILOT_LOGIN_REQUIRED"
+    assert store.commits == 0
+    assert client.get("/api/v1/copilot/status").json() == {
+        "status": "authenticating", "error_code": "COPILOT_LOGIN_REQUIRED",
+    }
+
+
+def test_copilot_stream_failure_does_not_save_or_mock(
+    api: tuple[TestClient, FakeStore, FakeAIClient],
+) -> None:
+    client, store, _ = api
+
+    class FailedCopilot:
+        async def stream_chat(
+            self, messages: list[AIMessageInput],
+        ) -> AsyncIterator[AIStreamChunk]:
+            yield AIStreamChunk("content", "Partial")
+            raise CopilotError("Copilot model request failed")
+
+    app.dependency_overrides[get_ai_client] = FailedCopilot
+    original_messages = list(store.conversations[0].messages)
+    response = client.post(
+        "/api/v1/conversation",
+        json={
+            "user_id": "01", "conversation_id": str(CONVERSATION_A_ID),
+            "messages": [], "content": "Hello",
+        },
+    )
+    assert "event: content" in response.text
+    assert "event: error" in response.text
+    assert "COPILOT_STREAM_FAILED" in response.text
+    assert "event: done" not in response.text
+    assert "模拟数据" not in response.text
+    assert store.commits == 0
+    assert store.conversations[0].messages == original_messages

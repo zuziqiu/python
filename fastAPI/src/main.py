@@ -10,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from src.AIModels.copilot import CopilotService
 from src.AIModels.openai import create_openai_client
 
 # v1 路由聚合器导出所有当前版本的 HTTP 接口。
@@ -41,15 +42,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 服务开始接收请求前执行 SELECT 1；连接串、账号或 PostgreSQL 不可用时启动失败。
     await connect_database()
     openai_client = None
+    copilot_service = None
     try:
-        openai_client = create_openai_client()
+        if settings.ai_provider == "openai":
+            openai_client = create_openai_client()
         app.state.openai_client = openai_client
+        if settings.ai_provider == "copilot":
+            copilot_service = CopilotService(
+                cli_path=settings.copilot_cli_path,
+                runtime_path=settings.copilot_runtime_path,
+                model=settings.copilot_model,
+                auto_login=settings.copilot_auto_login,
+            )
+            app.state.copilot_service = copilot_service
+            copilot_service.start()
         yield
     finally:
-        if openai_client is not None:
-            await openai_client.close()
-        # 服务停止时释放数据库连接池，避免连接长期占用。
-        await close_database()
+        try:
+            if copilot_service is not None:
+                await copilot_service.close()
+        finally:
+            try:
+                if openai_client is not None:
+                    await openai_client.close()
+            finally:
+                await close_database()
 
 
 def create_app() -> FastAPI:

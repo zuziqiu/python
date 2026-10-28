@@ -18,13 +18,13 @@ then apply the schema migration:
 uv run alembic upgrade head
 ```
 
-Set `APP_OPENAI_API_KEY` as well. The application does not read `AI_KEY`.
-Configure both values through the deployment environment and do not commit
-credentials to `.env`.
+The default AI provider is Copilot. Set `APP_AI_PROVIDER=openai` and
+`APP_OPENAI_API_KEY` to use the previous OpenAI path instead. The application
+does not read `AI_KEY`. Do not commit credentials to `.env`.
 
 The default OpenAI base URL is `https://api.openai.com/v1` and the default model
 is `gpt-4o-mini`. Override them with `APP_OPENAI_BASE_URL` and `APP_OPENAI_MODEL`.
-When the API key is missing or the upstream AI call fails, the stream emits an
+In OpenAI mode only, when the API key is missing or the upstream AI call fails, the stream emits an
 ordinary `content` event containing `delta`, `question`, and a timestamped mock
 `answer`, followed by `done` with the conversation ID. Mock answers are persisted
 like normal answers. If the upstream stream already emitted partial content,
@@ -37,6 +37,62 @@ uv run uvicorn src.main:app --reload
 ```
 
 API documentation: http://127.0.0.1:8000/docs
+
+## 项目启动后自动进行 Copilot 企业认证
+
+启动命令不变：`uv run uvicorn src.main:app --reload`。
+默认 `APP_AI_PROVIDER=copilot`，通过官方 Python SDK 调用 Copilot。
+不需要 GitHub MCP 或 OpenAI API key。数据库仍按原生命周期要求连接。
+
+先按 [官方指南](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
+安装一次官方 CLI；macOS 可以执行：
+
+```bash
+brew install --cask copilot-cli
+```
+
+之后只需要原项目启动命令：
+
+1. FastAPI 启动后在后台检查独立 SDK 登录状态，不阻塞服务接收请求。
+2. 未登录时自动运行官方 `copilot login`，由 CLI 发起浏览器授权；选择获得企业席位的账号。
+   若当前环境选择设备码流程，请按服务终端显示的地址和验证码完成授权。
+3. 登录完成后重新加载 SDK 运行时并验证认证状态，聊天接口直接调用 Copilot。
+4. 登录配置与 SDK 共用 `~/.cache/enterprise-api/copilot/`，
+   由官方 CLI 管理凭据。普通的 `copilot login` 默认目录与此目录不同；
+   项目不读取 VS Code Token，也不把 Token 返回给前端。
+   SDK 使用支持本机钥匙串登录的 `copilot-cli` 模式；不能改为 `empty` 模式，
+   后者会禁用系统钥匙串读取，导致 CLI 已登录而 SDK 仍显示未认证。
+5. 已保存的有效登录会自动复用；本机多个进程通过文件锁串行化登录，并在取得锁后重新检查认证。
+   热重载会停止本进程正在等待的登录子进程；尚未完成的授权可能需要重新进行。
+
+可访问 `GET /api/v1/copilot/status` 查看 `starting`、`login_required`、
+`authenticating`、`ready` 或 `failed` 状态及稳定错误码。`ready` 仅证明认证可用，
+不保证模型权限或额度；真实聊天仍可能报告上游错误。
+未认证时聊天接口返回 HTTP 503；模型调用失败时输出 SSE `error`，
+不输出 `done`、不保存失败轮次，也不退回模拟回答。
+缺少 CLI 时服务保留可访问状态，并在日志中明确提示安装步骤。
+启动检查上限 30 秒，等待本机登录锁及授权合计上限 300 秒。
+取消或超时后需重启服务重试；不会后台无限反复弹出授权。
+
+配置项：
+
+| 配置 | 默认值 | 用途 |
+|---|---|---|
+| `APP_AI_PROVIDER` | `copilot` | 切到 `openai` 可保留原聊天行为 |
+| `APP_COPILOT_AUTO_LOGIN` | `true` | 本机未登录时自动发起官方授权 |
+| `APP_COPILOT_CLI_PATH` | 空 | 自动从 PATH 查找，也可指定官方 CLI 绝对路径 |
+| `APP_COPILOT_RUNTIME_PATH` | 空 | 默认使用 CLI；可指定独立官方运行时 |
+| `APP_COPILOT_MODEL` | `auto` | 选择企业允许的模型 |
+
+聊天每个 HTTP 请求使用独立 SDK 会话，并显式传递历史消息；在空临时工作目录运行，
+禁用工具、MCP、技能、本地配置发现、文件 hooks 及 Git 操作，不读取项目业务文件。
+单轮模型请求等待上限 300 秒，客户端断开时取消任务并中止会话。
+这是本机单用户开发功能（登录锁使用 Unix `flock`），不是生产、多租户或共享企业席位方案。
+部署时应关闭自动登录并按企业策略配置凭据。不要将本机开发服务公开到网络。
+
+`uv run --module src.AIModels.copilot` 仍是可选诊断入口，而不是项目启动命令。
+它使用相同认证目录，不自动登录；只有模型真实返回预期结果才输出 `COPILOT_OK`。
+企业账号须允许 CLI，模型请求可能消耗账户额度。
 
 ## Conversation API
 
