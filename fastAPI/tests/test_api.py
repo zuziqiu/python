@@ -264,6 +264,7 @@ def test_failed_stream_returns_and_persists_mock_answer(
     assert "event: error" not in response.text
     done_data = json.loads(response.text.split("event: done\ndata: ", 1)[1].split("\n\n", 1)[0])
     assert done_data["conversation_id"] == str(CONVERSATION_A_ID)
+    assert done_data["answer"] == content_data["answer"]
     assert store.commits == 1
     assert store.conversations[0].messages == original_messages + [
         {"role": "user", "content": "Will fail"},
@@ -292,6 +293,7 @@ def test_unconfigured_ai_returns_mock_answer(
     assert store.commits == 1
     assert len(store.conversations) == 1
     assert done_data["conversation_id"] == str(store.conversations[0].id)
+    assert done_data["answer"] == content_data["answer"]
     assert store.conversations[0].messages == [
         {"role": "user", "content": "No API key"},
         {"role": "assistant", "content": content_data["answer"]},
@@ -313,6 +315,49 @@ def test_conversation_rejects_non_owner_user_id(
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert store.commits == 0
     assert ai_client.requests == []
+
+
+@pytest.mark.parametrize("rag_enabled", [False, True])
+def test_done_contains_exact_merged_answer_without_reasoning(
+    api: tuple[TestClient, FakeStore, FakeAIClient], rag_enabled: bool,
+) -> None:
+    client, store, _ = api
+    store.conversations.clear()
+    deltas = ["根据资料，", "三技能会击退敌人。", '\n引用："技能介绍" [K1]']
+
+    class MultiChunkClient:
+        async def stream_chat(
+            self, messages: list[AIMessageInput],
+        ) -> AsyncIterator[AIStreamChunk]:
+            yield AIStreamChunk("reasoning", "This is not answer text.")
+            for delta in deltas:
+                yield AIStreamChunk("content", delta)
+
+    app.dependency_overrides[get_ai_client] = MultiChunkClient
+    if rag_enabled:
+        retriever = AsyncMock()
+        retriever.retrieve.return_value = RagContext([])
+        app.dependency_overrides[get_rag_retriever] = lambda: retriever
+
+    response = client.post(
+        "/api/v1/conversation",
+        json={"user_id": "01", "messages": [], "content": "公孙离三技能是什么？"},
+    )
+    events = [
+        (block.split("\n", 1)[0].removeprefix("event: "),
+         json.loads(block.split("\ndata: ", 1)[1]))
+        for block in response.text.strip().split("\n\n")
+    ]
+    assert response.status_code == 200
+    assert [data["delta"] for event, data in events if event == "content"] == deltas
+    done_event, done_data = events[-1]
+    assert done_event == "done"
+    assert done_data == {
+        "conversation_id": str(store.conversations[0].id),
+        "answer": "".join(deltas),
+    }
+    assert done_data["answer"] == store.conversations[0].messages[-1]["content"]
+    assert store.commits == 1
 
 
 def test_copilot_not_ready_returns_503_and_exposes_safe_status(

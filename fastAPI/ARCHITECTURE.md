@@ -101,12 +101,15 @@ sequenceDiagram
     API-->>Client: content events
     AI-->>API: [DONE]
     API->>DB: 一次事务追加 user + assistant
-    API-->>Client: done + conversation_id
+    API-->>Client: done + conversation_id + answer
 ```
 
 只有上游返回 `[DONE]` 且正文非空时才写数据库。流断开或上游报错时返回
 `error` 事件，不保存半轮对话。`reasoning_content` 仅用于实时展示，既不持久化，
 也不加入下一轮上下文。
+
+最后的 `done.answer` 是正文增量拼接后的完整回答，与保存的 assistant 内容一致；
+在数据库提交成功后才发送。客户端可直接展示它，或用它覆盖流式累加值，不能再次追加。
 
 流完成后的写入使用生成器内部独立短事务，因为请求级数据库依赖的生命周期
 覆盖整个流，不能用于表达“模型完整结束后再提交”的边界。更新已有会话时会锁定

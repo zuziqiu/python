@@ -26,7 +26,7 @@ The default OpenAI base URL is `https://api.openai.com/v1` and the default model
 is `gpt-4o-mini`. Override them with `APP_OPENAI_BASE_URL` and `APP_OPENAI_MODEL`.
 In OpenAI mode only, when the API key is missing or the upstream AI call fails, the stream emits an
 ordinary `content` event containing `delta`, `question`, and a timestamped mock
-`answer`, followed by `done` with the conversation ID. Mock answers are persisted
+`answer`, followed by `done` with the conversation ID and the full answer. Mock answers are persisted
 like normal answers. If the upstream stream already emitted partial content,
 the mock text is appended to it and the combined answer is persisted.
 
@@ -115,6 +115,18 @@ brew install --cask copilot-cli
 complete model response, the current user message and final assistant answer are
 appended to `conversation.messages` in one database transaction.
 
+After that transaction commits, the final SSE event includes the same complete
+answer that was saved:
+
+```text
+event: done
+data: {"conversation_id":"...","answer":"根据这份资料，公孙离三技能……"}
+```
+
+`answer` concatenates only `content.delta`, excluding reasoning. Postman can
+display it directly. Clients should replace their accumulated text with this
+final value, not append it again. Earlier `content` events remain unchanged.
+
 ## RAG 资料准备
 
 第一版使用 `knowledge/` 中的 Markdown 作为共用测试知识库，暂不导入业务用户数据。
@@ -188,7 +200,7 @@ data: {"mode":"hybrid","sources":[{"source":"gongsunli.md","position":2,"section
 并对应正文引用；不要把它当作回答文字追加。
 当前不新增数据库字段：只保存原始提问及回答（含模型生成的引用文本），
 不保存来源事件和拼接的 system 上下文；刷新后不能从会话 API 恢复结构化来源。
-`done` 仍只含 `conversation_id`。
+`done` 包含 `conversation_id` 和完整 `answer`，仅在问答事务提交成功后发出。
 
 不调用聊天模型的代码验证：
 

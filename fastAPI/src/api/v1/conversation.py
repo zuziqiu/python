@@ -120,7 +120,10 @@ async def stream_conversation(
                 )
                 await write_db.commit()
 
-            yield _sse_event("done", {"conversation_id": str(conversation_id)})
+            yield _sse_event("done", {
+                "conversation_id": str(conversation_id),
+                "answer": assistant_content,
+            })
         finally:
             assistant_parts.clear()
             ai_messages.clear()
